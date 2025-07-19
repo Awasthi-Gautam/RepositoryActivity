@@ -41,8 +41,8 @@ public class RepositoryActivityController {
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
-    @GetMapping( "/test")
-    public String test() throws ConnectorException {
-       return "test";
+    @GetMapping( "/health")
+    public String getServiceStatus() {
+       return "SERVICE RUNNING";
     }
 }

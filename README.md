@@ -40,12 +40,20 @@ Update GITHUB_TOKEN in `application.properties` (under `src/main/resources`) wit
 1. Health‑check 
 - `curl -X GET "http://localhost:8080/api/v1/activity/health"`
  The Response should be "SERVICE RUNNING"
-2. Fetch Repositories and most recent 20 commits
-  - `curl -X GET "http://localhost:8080/api/v1/activity/github/repos/Awasthi-Gautam" \
-     -H "Accept: application/json"`
-    Response -
+2. Fetch Repositories and most recent 20 commits,
+   - `GET /api/v1/activity/{**source**}/repos/{**owner**}`
+   - Path parameters:
+     - **source**: "github" or "bitbucket"
+     - **owner**: GitHub username (e.g. Awasthi-Gautam/octocat) or Bitbucket workspace
+
+  - Use the below curl for getting response.
 
     ```
+    curl -X GET "http://localhost:8080/api/v1/activity/github/repos/Awasthi-Gautam" \
+     -H "Accept: application/json"
+    
+    
+    RESPONSE -
     [{
     "repositoryName": "RepositoryActivity",
     "recentCommits": [
@@ -75,3 +83,9 @@ Update GITHUB_TOKEN in `application.properties` (under `src/main/resources`) wit
       }
     ]}]
 
+# Extending to New VCS
+- Implement RepositoryActivityConnector in a new @Service (e.g. BitBucketConnector/GitLabConnector).
+
+- Register your connector in ConnectorFactory.
+
+- Hit /api/v1/activity/gitlab/repos/{owner} — no controller changes needed.

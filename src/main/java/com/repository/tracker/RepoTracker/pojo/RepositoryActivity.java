@@ -12,7 +12,7 @@ import java.util.List;
 @Setter
 @Builder
 public class RepositoryActivity {
-    String repoName;
+    String repositoryName;
     List<RepositoryCommit> recentCommits;
 }
 

@@ -182,7 +182,7 @@ public class GitHubConnector implements RepositoryActivityConnector {
 //    }
 
     private RepositoryActivity toRepositoryActivity(GithubRepositoryDto repo, List<GitHubCommitDto> commits) {
-        return RepositoryActivity.builder().repoName(repo.getName())
+        return RepositoryActivity.builder().repositoryName(repo.getName())
                 .recentCommits(commits.stream().map(GitHubCommitDto::toCommit).collect(Collectors.toList())).build();
     }
 

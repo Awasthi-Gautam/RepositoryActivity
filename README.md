@@ -47,7 +47,7 @@ Update GITHUB_TOKEN in `application.properties` (under `src/main/resources`) wit
 
     ```
     [{
-    "repoName": "RepositoryActivity",
+    "repositoryName": "RepositoryActivity",
     "recentCommits": [
       {
         "sha": "0a2ace69e0534b3fee5d35fb81ff5b6874c33bad",
@@ -64,7 +64,7 @@ Update GITHUB_TOKEN in `application.properties` (under `src/main/resources`) wit
         "timestamp": "2025-07-19T08:02:41Z"
       }
     ] },{
-    "repoName": "RepoTracker",
+    "repositoryName": "RepoTracker",
     "recentCommits": [
       {
         "sha": "2ef98c7a65624d1dd77aa6fbe9a0607747353cc1",

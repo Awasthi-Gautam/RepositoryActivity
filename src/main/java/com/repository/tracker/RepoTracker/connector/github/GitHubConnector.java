@@ -2,16 +2,15 @@ package com.repository.tracker.RepoTracker.connector.github;
 
 import com.repository.tracker.RepoTracker.connector.RepositoryActivityConnector;
 import com.repository.tracker.RepoTracker.exceptions.ConnectorException;
+import com.repository.tracker.RepoTracker.pojo.RepositoryActivity;
+import com.repository.tracker.RepoTracker.pojo.github.GitHubCommitDto;
+import com.repository.tracker.RepoTracker.pojo.github.GithubRepositoryDto;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
-import com.repository.tracker.RepoTracker.pojo.github.GithubRepositoryDto;
-import com.repository.tracker.RepoTracker.pojo.RepositoryActivity;
-import com.repository.tracker.RepoTracker.pojo.github.GitHubCommitDto;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -19,12 +18,18 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 public class GitHubConnector implements RepositoryActivityConnector {
 
-    private static final Integer REPOS_PER_PAGE = 20;
+    private static final int REPOS_PER_PAGE = 20;
+    private static final int COMMITS_PER_PAGE = 30;
     private static final int REQUIRED_COMMITS = 20;
-    private static final Object COMMITS_PER_PAGE = 30;
+
+    private static final String PATH_REPOS = "/users/{user}/repos";
+    private static final String PATH_COMMITS = "/repos/{owner}/{repo}/commits";
+
+    private static final String HEADER_RATE_LIMIT_RESET = "X-RateLimit-Reset";
     private final WebClient githubWebClient;
 
     public GitHubConnector(@Qualifier("gitHubWebClient") WebClient githubWebClient) {
@@ -58,12 +63,10 @@ public class GitHubConnector implements RepositoryActivityConnector {
 
             // 1) Perform the request and get a ResponseEntity<List<Dto>>
             ClientResponse response = githubWebClient.get()
-                    .uri(uri -> uri
-                            .path("/repos/{owner}/{repo}/commits")
+                    .uri(uri -> uri.path(PATH_COMMITS)
                             .queryParam("per_page", COMMITS_PER_PAGE)
-                            .queryParam("page",    currentPage)
+                            .queryParam("page", currentPage)
                             .build(owner, repoName))
-                    .header(HttpHeaders.ACCEPT, "application/vnd.github+json")
                     .exchange()
                     .block();
 
@@ -71,60 +74,17 @@ public class GitHubConnector implements RepositoryActivityConnector {
                 throw new ConnectorException("Null response for commits page " + currentPage, null);
             }
 
-            HttpStatus status = response.statusCode();
-            List<GitHubCommitDto> pageItems;
+            List<GitHubCommitDto> pageItems = handleResponse(response, GitHubCommitDto.class, "commits page " + page);
 
-            System.out.println("Status: " + status);
-            if (status.is2xxSuccessful()) {
-                pageItems = response.bodyToFlux(GitHubCommitDto.class)
-                        .collectList()
-                        .block();
-                if (pageItems == null) pageItems = Collections.emptyList();
-
-            } else if (status == HttpStatus.FORBIDDEN || status == HttpStatus.CONFLICT || status == HttpStatus.NOT_FOUND) {
-                // skip pages for which we don't have permission
-                System.out.println("Skipping commits page " + currentPage + " (403 Forbidden)");
-                pageItems = Collections.emptyList();
-
-            } else if (status == HttpStatus.TOO_MANY_REQUESTS) {
-                // rate‑limit: wait until reset then retry
-                String reset = response.headers().header("X-RateLimit-Reset").stream().findFirst().orElse(null);
-                if (reset != null) {
-                    long waitSecs = Long.parseLong(reset)
-                            - Instant.now().getEpochSecond()
-                            + 1;
-                    if (waitSecs > 0) {
-                        System.out.println("Rate limit hit: sleeping " + waitSecs + "s before retrying commits page " + currentPage);
-                        try {
-                            Thread.sleep(waitSecs * 1000);
-                        } catch (InterruptedException ie) {
-                            Thread.currentThread().interrupt();
-                            throw new ConnectorException("Interrupted waiting for rate limit reset", ie);
-                        }
-                    }
-                    // retry same page
-                    continue;
-                } else {
-                    throw new ConnectorException("429 Too Many Requests but no X-RateLimit-Reset header", null);
-                }
-
-            } else {
-                // unexpected error
-                throw new ConnectorException(
-                        "Unexpected status " + status + " on commits page " + currentPage,
-                        null
-                );
-            }
-
-            // 2) stop if no more commits
+            // stop if no more commits
             if (pageItems.isEmpty()) {
                 break;
             }
 
-            // 3) collect
+            // collect
             commits.addAll(pageItems);
 
-            // 4) stop if we've gathered enough
+            // stop if we've gathered enough
             if (commits.size() >= REQUIRED_COMMITS) {
                 break;
             }
@@ -139,48 +99,6 @@ public class GitHubConnector implements RepositoryActivityConnector {
         return commits;
     }
 
-
-//    private List<GitHubCommitDto> fetchRecentCommits(String owner, String repoName) {
-//        List<GitHubCommitDto> commits = new ArrayList<>();
-//        int page = 1;
-//
-//        while (true) {
-//            final int currentPage = page;
-//
-//            List<GitHubCommitDto> pageItems = githubWebClient.get()
-//                    .uri(uri -> uri
-//                            .path("/repos/{owner}/{repo}/commits")
-//                            .queryParam("per_page", COMMITS_PER_PAGE)
-//                            .queryParam("page", currentPage)
-//                            .build(owner, repoName))
-//                    .header(HttpHeaders.ACCEPT, "application/vnd.github+json")
-//                    .retrieve()
-//                    .bodyToFlux(GitHubCommitDto.class)
-//                    .collectList()
-//                    .block();
-//
-//            // stop if no more commits
-//            if (pageItems == null || pageItems.isEmpty()) {
-//                break;
-//            }
-//
-//            commits.addAll(pageItems);
-//
-//            // if we've got enough, stop
-//            if (commits.size() >= REQUIRED_COMMITS) {
-//                break;
-//            }
-//
-//            page++;
-//
-//        }
-//        // trim to exactly REQUIRED_COMMITS if we over‑fetched
-//        if (commits.size() > REQUIRED_COMMITS) {
-//            return commits.subList(0, REQUIRED_COMMITS);
-//        }
-//        return commits;
-//    }
-
     private RepositoryActivity toRepositoryActivity(GithubRepositoryDto repo, List<GitHubCommitDto> commits) {
         return RepositoryActivity.builder().repositoryName(repo.getName())
                 .recentCommits(commits.stream().map(GitHubCommitDto::toCommit).collect(Collectors.toList())).build();
@@ -191,66 +109,24 @@ public class GitHubConnector implements RepositoryActivityConnector {
         int page = 1;
         while (true) {
             int finalPage = page;
-            ResponseEntity<List<GithubRepositoryDto>> response = githubWebClient.get()
+            ClientResponse response = githubWebClient.get()
                     .uri(uri -> uri
-                            .path("/users/{user}/repos")
+                            .path(PATH_REPOS)
                             .queryParam("per_page", REPOS_PER_PAGE)
                             .queryParam("page", finalPage)
-                            .queryParam("type",    "all")
+                            .queryParam("type", "all")
                             .build(userName))
-                    .header(HttpHeaders.ACCEPT, "application/vnd.github+json")
-                    .retrieve()
-                    .toEntityList(GithubRepositoryDto.class)
+                    .exchange()
                     .block();
+            ;
 
             if (response == null) {
                 throw new ConnectorException("Null response for repos page " + finalPage, null);
             }
 
-            HttpStatus status = response.getStatusCode();
-            List<GithubRepositoryDto> pageItems;
+            List<GithubRepositoryDto> pageItems = handleResponse(response, GithubRepositoryDto.class,
+                    "Repos page " + page);
 
-            if (status.is2xxSuccessful()) {
-                pageItems = response.getBody();
-                if (pageItems == null) pageItems = Collections.emptyList();
-
-            } else if (status == HttpStatus.FORBIDDEN) {
-                System.out.println("Skipping page " + finalPage + " (403 Forbidden)");
-                pageItems = Collections.emptyList();
-
-            }
-            else if (status == HttpStatus.TOO_MANY_REQUESTS) {
-                // rate‑limit logic
-                String reset = response.getHeaders()
-                        .getFirst("X-RateLimit-Reset");
-                if (reset != null) {
-                    long waitSecs = Long.parseLong(reset)
-                            - Instant.now().getEpochSecond()
-                            + 1;
-                    if (waitSecs > 0) {
-                        System.out.println("Rate limit hit: sleeping " + waitSecs + "s");
-                        try {
-                            Thread.sleep(waitSecs * 1000);
-                        } catch (InterruptedException ie) {
-                            Thread.currentThread().interrupt();
-                            throw new ConnectorException("Interrupted waiting for rate reset", ie);
-                        }
-                    }
-                    // retry same page
-                    continue;
-                } else {
-                    throw new ConnectorException("429 Too Many Requests (no reset header)", null);
-                }
-
-            }
-            else {
-                throw new ConnectorException(
-                        "Unexpected status " + status + " on repos page " + finalPage,
-                        null
-                );
-            }
-
-            // 2) Stop if no items
             if (pageItems.isEmpty()) {
                 break;
             }
@@ -262,34 +138,49 @@ public class GitHubConnector implements RepositoryActivityConnector {
         return all;
     }
 
-//    private List<GithubRepositoryDto> fetchAllRepos(String userName) {
-//        List<GithubRepositoryDto> all = new ArrayList<>();
-//        int page = 1;
-//        while (true) {
-//            int finalPage = page;
-//            List<GithubRepositoryDto> pageItems = githubWebClient.get()
-//                    .uri(uri -> uri
-//                            .path("/users/{userName}/repos")
-//                            .queryParam("per_page", REPOS_PER_PAGE)
-//                            .queryParam("page", finalPage)
-////                            .queryParam("type", "all")
-//                            .build(userName))
-//                    .header(HttpHeaders.ACCEPT, "application/vnd.github+json")
-//                    .retrieve()
-//                    .bodyToFlux(GithubRepositoryDto.class)
-//                    .collectList()
-//                    .block();
-//
-//            if (pageItems == null || pageItems.isEmpty()) {
-//                break;
-//            }
-//            System.out.println("repos page wise: " + pageItems.stream().map(GithubRepositoryDto::getFullName).collect(Collectors.joining(",")));
-//            all.addAll(pageItems);
-//            page++;
-//        }
-//
-//        return all;
-//    }
+    private <T> List<T> handleResponse(ClientResponse resp, Class<T> dtoClass, String context)
+            throws ConnectorException {
+        HttpStatus status = resp.statusCode();
+
+        if (status.is2xxSuccessful()) {
+            return resp.bodyToFlux(dtoClass).collectList().blockOptional().orElse(Collections.emptyList());
+        }
+
+        if (status == HttpStatus.FORBIDDEN ||
+                status == HttpStatus.NOT_FOUND ||
+                status == HttpStatus.CONFLICT) {
+            log.warn("Skipping {} (status {})", context, status);
+            return Collections.emptyList();
+        }
+
+        if (status == HttpStatus.TOO_MANY_REQUESTS) {
+            return handleRateLimit(resp, dtoClass, context);
+        }
+
+        throw new ConnectorException("Unexpected status " + status + " during " + context, null);
+    }
+
+    private <T> List<T> handleRateLimit(ClientResponse resp, Class<T> dtoClass, String context)
+            throws ConnectorException {
+        String resetHeader = resp.headers().header(HEADER_RATE_LIMIT_RESET)
+                .stream().findFirst().orElse(null);
+        if (resetHeader != null) {
+            long waitSecs = Long.parseLong(resetHeader)
+                    - Instant.now().getEpochSecond()
+                    + 1;
+            log.warn("Rate limited during {}: sleeping {}s", context, waitSecs);
+            if (waitSecs > 0) {
+                try {
+                    Thread.sleep(waitSecs * 1_000L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new ConnectorException("Interrupted waiting for rate limit reset", e);
+                }
+            }
+
+        }
+        throw new ConnectorException("Rate limit exceeded during " + context, null);
+    }
 }
 
 

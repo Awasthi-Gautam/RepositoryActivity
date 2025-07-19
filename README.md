@@ -22,6 +22,14 @@ A Spring Boot WebFlux service that fetches all public repository and commit act
 
 ---
 
+## Assumptions
+
+- User has Personal token. Paste it in application.properties before Testing
+- The api works for a github user only and can be extended to fetch repositories for Organization.
+- Rate limiting is implemented but not tested.
+
+---
+
 # FOR TESTING 
 Clone the Repository
 
@@ -89,3 +97,6 @@ Update GITHUB_TOKEN in `application.properties` (under `src/main/resources`) wit
 - Register your connector in ConnectorFactory.
 
 - Hit /api/v1/activity/gitlab/repos/{owner} — no controller changes needed.
+
+
+Reach out at Awasthigautam511@gmail.com for any issues/enhancements.
